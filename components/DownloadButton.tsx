@@ -10,23 +10,42 @@ interface DownloadButtonProps {
 }
 
 /**
- * Cross-browser reliable file download using a temporary anchor element
- * appended to the DOM. This approach works in all modern browsers
- * including Safari which blocks programmatic clicks on detached elements.
+ * Cross-browser reliable file download.
+ * Uses multiple strategies to ensure the download works across
+ * all browsers including Safari, iOS Safari, and popup-blocked contexts.
  */
 function triggerDownload(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  a.style.display = 'none';
-  document.body.appendChild(a);
-  a.click();
-  // Delay cleanup to ensure download starts
-  setTimeout(() => {
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  }, 250);
+  // Strategy 1: Use anchor element with download attribute
+  try {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.style.display = 'none';
+    // Setting rel helps with Safari
+    a.rel = 'noopener';
+    document.body.appendChild(a);
+
+    // Use setTimeout to avoid popup blocker issues
+    setTimeout(() => {
+      a.click();
+      // Longer cleanup delay to ensure download starts
+      setTimeout(() => {
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }, 1000);
+    }, 0);
+  } catch (err) {
+    console.error('[triggerDownload] Anchor approach failed:', err);
+    // Strategy 2: Open blob in new window as fallback
+    try {
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank');
+      setTimeout(() => URL.revokeObjectURL(url), 30000);
+    } catch (e2) {
+      console.error('[triggerDownload] window.open fallback failed:', e2);
+    }
+  }
 }
 
 export default function DownloadButton({ result }: DownloadButtonProps) {
@@ -49,11 +68,20 @@ export default function DownloadButton({ result }: DownloadButtonProps) {
       });
 
       const contentType = res.headers.get('Content-Type') || '';
+      console.log(`[DownloadButton] Compile response: status=${res.status}, contentType=${contentType}, size=${res.headers.get('Content-Length')}`);
 
       if (res.ok && contentType.includes('application/pdf')) {
         // Success — download the PDF
-        const blob = await res.blob();
-        triggerDownload(blob, `${filename}.pdf`);
+        const arrayBuffer = await res.arrayBuffer();
+        console.log(`[DownloadButton] PDF arrayBuffer size: ${arrayBuffer.byteLength} bytes`);
+
+        if (arrayBuffer.byteLength < 100) {
+          throw new Error('Received empty or invalid PDF from compilation server.');
+        }
+
+        const blob = new Blob([arrayBuffer], { type: 'application/pdf' });
+        const safeName = filename.endsWith('.pdf') ? filename : `${filename}.pdf`;
+        triggerDownload(blob, safeName);
         toast.success(`${label} PDF downloaded!`);
       } else {
         // Compilation failed — try to get error, fall back to .tex download

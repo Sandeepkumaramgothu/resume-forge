@@ -1,9 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { compileLatex } from '@/lib/latexCompile';
 
+// Allow up to 60 seconds for LaTeX compilation on Vercel
+export const maxDuration = 60;
+
 export async function POST(req: NextRequest) {
   try {
     const { latexCode, filename } = await req.json();
+    console.log(`[compile] Received request: filename=${filename}, latexCode length=${latexCode?.length || 0}`);
 
     if (!latexCode || typeof latexCode !== 'string') {
       return NextResponse.json(

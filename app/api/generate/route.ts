@@ -3,6 +3,8 @@ import OpenAI from 'openai';
 import { buildSystemPrompt } from '@/lib/systemPrompt';
 import { checkRateLimit, validateJobDescription } from '@/lib/utils';
 
+// Allow up to 60 seconds for GPT-4o generation on Vercel
+export const maxDuration = 60;
 export async function POST(req: NextRequest) {
   try {
     // Rate limiting by IP
