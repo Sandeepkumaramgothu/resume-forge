@@ -27,15 +27,22 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    return new NextResponse(result.pdfBuffer, {
+    // Convert ArrayBuffer to Uint8Array for reliable NextResponse handling
+    const pdfBytes = new Uint8Array(result.pdfBuffer);
+    const safeName = (filename || 'document').replace(/[^a-zA-Z0-9_\-\.]/g, '_');
+
+    return new NextResponse(pdfBytes, {
+      status: 200,
       headers: {
         'Content-Type': 'application/pdf',
-        'Content-Disposition': `attachment; filename="${filename || 'document'}.pdf"`,
+        'Content-Disposition': `attachment; filename="${safeName}.pdf"`,
+        'Content-Length': String(pdfBytes.byteLength),
         'Cache-Control': 'no-store',
       },
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error';
+    console.error('[compile] Error:', message);
     return NextResponse.json(
       { error: `Compilation error: ${message}`, fallback: true },
       { status: 500 }

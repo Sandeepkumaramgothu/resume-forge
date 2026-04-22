@@ -9,6 +9,26 @@ interface DownloadButtonProps {
   result: GeneratedResult;
 }
 
+/**
+ * Cross-browser reliable file download using a temporary anchor element
+ * appended to the DOM. This approach works in all modern browsers
+ * including Safari which blocks programmatic clicks on detached elements.
+ */
+function triggerDownload(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.style.display = 'none';
+  document.body.appendChild(a);
+  a.click();
+  // Delay cleanup to ensure download starts
+  setTimeout(() => {
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, 250);
+}
+
 export default function DownloadButton({ result }: DownloadButtonProps) {
   const [compilingResume, setCompilingResume] = useState(false);
   const [compilingCover, setCompilingCover] = useState(false);
@@ -18,6 +38,7 @@ export default function DownloadButton({ result }: DownloadButtonProps) {
     const setter = isResume ? setCompilingResume : setCompilingCover;
     const latexCode = isResume ? result.resumeTex : result.coverLetterTex;
     const filename = isResume ? result.meta.resumeFilename : result.meta.coverLetterFilename;
+    const label = isResume ? 'Resume' : 'Cover Letter';
 
     setter(true);
     try {
@@ -27,37 +48,40 @@ export default function DownloadButton({ result }: DownloadButtonProps) {
         body: JSON.stringify({ latexCode, filename }),
       });
 
-      if (res.headers.get('Content-Type')?.includes('application/pdf')) {
+      const contentType = res.headers.get('Content-Type') || '';
+
+      if (res.ok && contentType.includes('application/pdf')) {
+        // Success — download the PDF
         const blob = await res.blob();
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `${filename}.pdf`;
-        a.click();
-        URL.revokeObjectURL(url);
-        toast.success(`${isResume ? 'Resume' : 'Cover Letter'} PDF downloaded!`);
+        triggerDownload(blob, `${filename}.pdf`);
+        toast.success(`${label} PDF downloaded!`);
       } else {
+        // Compilation failed — try to get error, fall back to .tex download
+        let errorMsg = 'LaTeX compilation failed';
+        try {
+          const data = await res.json();
+          errorMsg = data.error || errorMsg;
+        } catch {
+          // Response wasn't JSON
+        }
+
+        console.warn(`[DownloadButton] Compile failed: ${errorMsg}`);
+
         // Fallback: download .tex file
-        const data = await res.json();
-        const blob = new Blob([data.latexCode || latexCode], { type: 'text/plain' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `${filename}.tex`;
-        a.click();
-        URL.revokeObjectURL(url);
-        toast.warning('PDF compile failed. Downloaded .tex file instead — open in Overleaf to compile.');
+        const texBlob = new Blob([latexCode], { type: 'application/x-tex' });
+        triggerDownload(texBlob, `${filename}.tex`);
+        toast.warning(
+          `PDF compilation failed — downloaded .tex file instead. Open in Overleaf to compile.\n\nError: ${errorMsg}`,
+          { duration: 8000 }
+        );
       }
-    } catch {
+    } catch (err) {
+      console.error('[DownloadButton] Network error:', err);
+
       // Last resort: download raw .tex
-      const blob = new Blob([latexCode], { type: 'text/plain' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${filename}.tex`;
-      a.click();
-      URL.revokeObjectURL(url);
-      toast.error('Download failed. Saved .tex file as fallback.');
+      const texBlob = new Blob([latexCode], { type: 'application/x-tex' });
+      triggerDownload(texBlob, `${filename}.tex`);
+      toast.error('Network error during compilation. Downloaded .tex file as fallback — open in Overleaf.');
     } finally {
       setter(false);
     }
